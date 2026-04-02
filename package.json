@@ -1,7 +1,7 @@
 {
   "name": "better-openapi-typescript",
-  "version": "0.1.0",
-  "description": "OpenAPI to TypeScript generator with per-tag splitting and SRP architecture",
+  "version": "0.0.1",
+  "description": "OpenAPI to TypeScript generator that splits output into one file per controller tag, producing clean, maintainable types with full ESM/CJS support",
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",
@@ -29,9 +29,15 @@
   },
   "keywords": [
     "openapi",
+    "swagger",
     "typescript",
     "codegen",
-    "schema"
+    "code-generation",
+    "api-types",
+    "schema",
+    "split-output",
+    "per-controller",
+    "clean-architecture"
   ],
   "license": "MIT",
   "devDependencies": {
