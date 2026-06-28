@@ -1,6 +1,6 @@
 {
   "name": "better-openapi-typescript",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "OpenAPI to TypeScript generator that splits output into one file per controller tag, producing clean, maintainable types with full ESM/CJS support",
   "type": "module",
   "main": "dist/index.cjs",
