@@ -39,6 +39,10 @@
     "per-controller",
     "clean-architecture"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/celsowm/better-openapi-typescript.git"
+  },
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^26.0.1",
