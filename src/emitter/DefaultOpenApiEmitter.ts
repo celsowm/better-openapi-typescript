@@ -5,7 +5,7 @@ import type {
   IEmitter,
 } from '../application/contracts';
 import { collectDiscriminatorRelations } from '../core/discriminator';
-import { getHttpMethods, groupPathsByTag } from '../core/tagGrouper';
+import { getHttpMethods, getOperationsForPath, groupPathsByTag } from '../core/tagGrouper';
 import { collectTagSchemas, classifySchemas } from '../core/schemaOwnershipClassifier';
 import { makeApiPathEnumMember, pascalToKebab, stripControllerSuffix } from '../core/naming';
 import {
@@ -22,7 +22,9 @@ import {
 } from '../core/schemaHelpers';
 import type {
   OpenApiOperation,
+  OpenApiMediaType,
   OpenApiParameter,
+  OpenApiPathItem,
   OpenApiResponse,
   OpenApiSchema,
   OpenApiSchemaObject,
@@ -30,7 +32,7 @@ import type {
 } from '../core/types';
 
 const INDENT = '    ';
-const NEVER_PARAMETER_KEYS = ['query', 'header', 'path', 'cookie'];
+const NEVER_PARAMETER_KEYS = ['query', 'header', 'path', 'cookie', 'querystring'];
 const DOC_START = '/**';
 const DOC_END = ' */';
 const DO_NOT_EDIT_MANUALLY = ' * Do not edit manually.';
@@ -40,6 +42,7 @@ export class DefaultOpenApiEmitter implements IEmitter {
     const eol = context.lineEnding;
     const spec = context.spec;
     const schemas = spec.components?.schemas ?? {};
+    const mediaTypes = spec.components?.mediaTypes ?? {};
     const paths = spec.paths ?? {};
 
     const tagGroups = groupPathsByTag(paths);
@@ -66,6 +69,7 @@ export class DefaultOpenApiEmitter implements IEmitter {
           group,
           exclusiveSchemas,
           schemas,
+          mediaTypes,
           discriminatorRelations,
           tagFileNames,
           eol,
@@ -134,6 +138,7 @@ export class DefaultOpenApiEmitter implements IEmitter {
     group: TagGroup,
     exclusiveSchemas: Map<string, string>,
     schemas: Record<string, OpenApiSchema>,
+    mediaTypes: Record<string, OpenApiMediaType>,
     discriminatorRelations: Map<string, { baseSchemaName: string; propertyName: string; values: string[] }>,
     tagFileNames: Map<string, string>,
     eol: string,
@@ -178,7 +183,7 @@ export class DefaultOpenApiEmitter implements IEmitter {
     lines.push('export interface operations {');
     for (const opId of Object.keys(group.operations).sort()) {
       const { def } = group.operations[opId];
-      lines.push(this.indent(this.emitOperation(opId, def, schemas, eol), 1, eol));
+      lines.push(this.indent(this.emitOperation(opId, def, schemas, mediaTypes, eol), 1, eol));
     }
     lines.push('}');
 
@@ -190,7 +195,7 @@ export class DefaultOpenApiEmitter implements IEmitter {
 
   private buildIndexFile(
     tagGroups: Map<string, TagGroup>,
-    paths: Record<string, Record<string, unknown>>,
+    paths: Record<string, OpenApiPathItem>,
     tagFileNames: Map<string, string>,
     eol: string,
     includeHeader: boolean,
@@ -246,11 +251,7 @@ export class DefaultOpenApiEmitter implements IEmitter {
       lines.push('');
       lines.push('export enum ApiPaths {');
       for (const [pathUrl, pathDef] of Object.entries(paths).sort(([a], [b]) => a.localeCompare(b))) {
-        for (const method of getHttpMethods()) {
-          const operation = pathDef[method as keyof typeof pathDef] as { operationId?: string } | undefined;
-          if (!operation) {
-            continue;
-          }
+        for (const { method, operation } of getOperationsForPath(pathDef)) {
           const memberName = makeApiPathEnumMember(method, pathUrl, operation.operationId);
           lines.push(this.line(1, `${memberName} = ${JSON.stringify(pathUrl)},`));
         }
@@ -290,11 +291,19 @@ export class DefaultOpenApiEmitter implements IEmitter {
 
     for (const method of getHttpMethods()) {
       const operation = pathDef[method as keyof typeof pathDef];
-      if (operation) {
+      if (operation?.operationId) {
         this.pushLine(lines, 1, `${method}: operations["${operation.operationId}"];`);
       } else {
         this.pushLine(lines, 1, `${method}?: never;`);
       }
+    }
+
+    for (const [method, operation] of Object.entries(pathDef)) {
+      if (getHttpMethods().includes(method) || !operation?.operationId) {
+        continue;
+      }
+
+      this.pushLine(lines, 1, `${formatPropertyKey(method)}: operations["${operation.operationId}"];`);
     }
 
     lines.push('};');
@@ -305,18 +314,19 @@ export class DefaultOpenApiEmitter implements IEmitter {
     operationId: string,
     operation: OpenApiOperation,
     schemas: Record<string, OpenApiSchema>,
+    mediaTypes: Record<string, OpenApiMediaType>,
     eol: string,
   ): string {
     const lines: string[] = [];
     lines.push(`"${operationId}": {`);
 
-    lines.push(...this.emitOperationParameters(operation.parameters ?? [], schemas, eol));
+    lines.push(...this.emitOperationParameters(operation.parameters ?? [], schemas, mediaTypes, eol));
 
     const requestBody = operation.requestBody;
     if (requestBody?.content) {
       this.pushLine(lines, 1, 'requestBody: {');
       this.pushLine(lines, 2, 'content: {');
-      lines.push(...this.emitMediaTypeEntries(requestBody.content, schemas, 3, eol));
+      lines.push(...this.emitMediaTypeEntries(requestBody.content, schemas, mediaTypes, 3, eol));
       this.pushLine(lines, 2, '};');
       this.pushLine(lines, 1, '};');
     } else {
@@ -328,6 +338,8 @@ export class DefaultOpenApiEmitter implements IEmitter {
       const typedResponse = response as OpenApiResponse;
       if (typedResponse.description) {
         this.pushLine(lines, 2, `/** @description ${typedResponse.description} */`);
+      } else if (typedResponse.summary) {
+        this.pushLine(lines, 2, `/** @description ${typedResponse.summary} */`);
       }
       this.pushLine(lines, 2, `${status}: {`);
       this.pushLine(lines, 3, 'headers: {');
@@ -336,7 +348,7 @@ export class DefaultOpenApiEmitter implements IEmitter {
 
       if (typedResponse.content) {
         this.pushLine(lines, 3, 'content: {');
-        lines.push(...this.emitMediaTypeEntries(typedResponse.content, schemas, 4, eol));
+        lines.push(...this.emitMediaTypeEntries(typedResponse.content, schemas, mediaTypes, 4, eol));
         this.pushLine(lines, 3, '};');
       } else {
         this.pushLine(lines, 3, 'content?: never;');
@@ -353,11 +365,13 @@ export class DefaultOpenApiEmitter implements IEmitter {
   private emitOperationParameters(
     parameters: OpenApiParameter[],
     schemas: Record<string, OpenApiSchema>,
+    mediaTypes: Record<string, OpenApiMediaType>,
     eol: string,
   ): string[] {
     const lines: string[] = [];
     const queryParams = parameters.filter((parameter) => parameter.in === 'query');
     const pathParams = parameters.filter((parameter) => parameter.in === 'path');
+    const querystringParams = parameters.filter((parameter) => parameter.in === 'querystring');
 
     this.pushLine(lines, 1, 'parameters: {');
 
@@ -392,6 +406,28 @@ export class DefaultOpenApiEmitter implements IEmitter {
     }
 
     this.pushLine(lines, 2, 'cookie?: never;');
+
+    if (querystringParams.length > 0) {
+      const hasRequiredQuerystring = querystringParams.some((parameter) => parameter.required);
+      this.pushLine(lines, 2, `querystring${hasRequiredQuerystring ? '' : '?'}: {`);
+      for (const parameter of querystringParams) {
+        const optional = parameter.required ? '' : '?';
+        const key = formatPropertyKey(parameter.name);
+        if (parameter.content) {
+          this.pushLine(lines, 3, `${key}${optional}: {`);
+          this.pushLine(lines, 4, 'content: {');
+          lines.push(...this.emitMediaTypeEntries(parameter.content, schemas, mediaTypes, 5, eol));
+          this.pushLine(lines, 4, '};');
+          this.pushLine(lines, 3, '};');
+        } else {
+          this.pushLine(lines, 3, `${key}${optional}: ${this.tsType(parameter.schema, schemas, eol)};`);
+        }
+      }
+      this.pushLine(lines, 2, '};');
+    } else {
+      this.pushLine(lines, 2, 'querystring?: never;');
+    }
+
     this.pushLine(lines, 1, '};');
 
     return lines;
@@ -406,16 +442,51 @@ export class DefaultOpenApiEmitter implements IEmitter {
   }
 
   private emitMediaTypeEntries(
-    content: Record<string, { schema?: OpenApiSchema }>,
+    content: Record<string, OpenApiMediaType>,
     schemas: Record<string, OpenApiSchema>,
+    mediaTypes: Record<string, OpenApiMediaType>,
     indentLevel: number,
     eol: string,
   ): string[] {
     const lines: string[] = [];
     for (const [mediaType, mediaSchema] of Object.entries(content ?? {})) {
-      lines.push(this.line(indentLevel, `"${mediaType}": ${this.tsType(mediaSchema.schema, schemas, eol)};`));
+      lines.push(this.line(indentLevel, `"${mediaType}": ${this.mediaTypePayloadType(mediaSchema, schemas, mediaTypes, eol)};`));
     }
     return lines;
+  }
+
+  private mediaTypePayloadType(
+    mediaType: OpenApiMediaType,
+    schemas: Record<string, OpenApiSchema>,
+    mediaTypes: Record<string, OpenApiMediaType>,
+    eol: string,
+  ): string {
+    const resolvedMediaType = this.resolveMediaType(mediaType, mediaTypes);
+
+    if (resolvedMediaType.schema !== undefined) {
+      return this.tsType(resolvedMediaType.schema, schemas, eol);
+    }
+
+    if (resolvedMediaType.itemSchema !== undefined) {
+      return `${wrapArrayItem(this.tsType(resolvedMediaType.itemSchema, schemas, eol))}[]`;
+    }
+
+    return 'unknown';
+  }
+
+  private resolveMediaType(
+    mediaType: OpenApiMediaType,
+    mediaTypes: Record<string, OpenApiMediaType>,
+  ): OpenApiMediaType {
+    const refName = typeof mediaType.$ref === 'string'
+      ? mediaType.$ref.match(/^#\/components\/mediaTypes\/([^/]+)$/)?.[1]
+      : undefined;
+
+    if (!refName) {
+      return mediaType;
+    }
+
+    return mediaTypes[refName] ?? mediaType;
   }
 
   private emitSchemaPropertyLines(

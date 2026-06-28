@@ -83,9 +83,19 @@ Each controller file exports three interfaces:
 
 ## Compatibility
 
-- OpenAPI 3.0.x and 3.1.x
+- OpenAPI 3.0.x, 3.1.x, and 3.2.x
 - JSON and YAML specs (with YAML anchor support)
 - ESM and CommonJS consumers
+
+### OpenAPI 3.2 support
+
+The generator supports OpenAPI 3.2 features that affect emitted TypeScript:
+
+- `query` operations and Path Item `additionalOperations`
+- `querystring` parameters, including content-based parameters
+- sequential media type payloads with `itemSchema`
+- reusable `components.mediaTypes` references
+- response `summary` comments when `description` is not present
 
 ## Development
 

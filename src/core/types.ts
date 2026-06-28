@@ -1,16 +1,20 @@
 export interface OpenApiDocument {
+  openapi?: string;
+  $self?: string;
   components?: {
     schemas?: Record<string, OpenApiSchema>;
+    mediaTypes?: Record<string, OpenApiMediaType>;
   };
   paths?: Record<string, OpenApiPathItem>;
 }
 
 export interface OpenApiPathItem {
-  [method: string]: OpenApiOperation | unknown;
+  additionalOperations?: Record<string, OpenApiOperation>;
+  [method: string]: OpenApiOperation | Record<string, OpenApiOperation> | unknown;
 }
 
 export interface OpenApiOperation {
-  operationId: string;
+  operationId?: string;
   tags?: string[];
   parameters?: OpenApiParameter[];
   requestBody?: OpenApiRequestBody;
@@ -18,19 +22,30 @@ export interface OpenApiOperation {
 }
 
 export interface OpenApiParameter {
-  in: 'query' | 'path' | 'header' | 'cookie' | string;
+  in: 'query' | 'querystring' | 'path' | 'header' | 'cookie' | string;
   name: string;
   required?: boolean;
   schema?: OpenApiSchema;
+  content?: Record<string, OpenApiMediaType>;
 }
 
 export interface OpenApiRequestBody {
-  content?: Record<string, { schema?: OpenApiSchema }>;
+  content?: Record<string, OpenApiMediaType>;
 }
 
 export interface OpenApiResponse {
+  summary?: string;
   description?: string;
-  content?: Record<string, { schema?: OpenApiSchema }>;
+  content?: Record<string, OpenApiMediaType>;
+}
+
+export interface OpenApiMediaType {
+  $ref?: string;
+  schema?: OpenApiSchema;
+  itemSchema?: OpenApiSchema;
+  prefixEncoding?: unknown;
+  itemEncoding?: unknown;
+  [key: string]: unknown;
 }
 
 export type OpenApiSchema = boolean | OpenApiSchemaObject;
@@ -39,8 +54,9 @@ export interface OpenApiSchemaObject {
   $ref?: string;
   type?: string | string[];
   discriminator?: {
-    propertyName: string;
+    propertyName?: string;
     mapping?: Record<string, string>;
+    defaultMapping?: string;
   };
   properties?: Record<string, OpenApiSchema>;
   patternProperties?: Record<string, OpenApiSchema>;
